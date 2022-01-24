@@ -1,10 +1,15 @@
 [package]
 name = "kvs"
 version = "0.1.0"
-authors = ["Clara van Staden <claravanstaden64@gmail.com>"]
+authors = ["Clara van Staden <clara@snowfork.com>"]
 description = "A key-value store"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+clap = { version = "3.0.10", features = ["derive"] }
+
+[dev-dependencies]
+assert_cmd = "0.11.0"
+predicates = "1.0.0"
