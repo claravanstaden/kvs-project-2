@@ -4,15 +4,15 @@ use std::collections::HashMap;
 #[derive(Debug)]
 /// Stores key-value pairs in memory.
 pub struct KvStore {
-    store: HashMap<String, String>
+    store: HashMap<String, String>,
 }
 
 impl KvStore {
     /// Creates an empty new key-value store using a hashmap data
     /// structure.
     pub fn new() -> KvStore {
-        KvStore{
-            store: HashMap::new()
+        KvStore {
+            store: HashMap::new(),
         }
     }
 
