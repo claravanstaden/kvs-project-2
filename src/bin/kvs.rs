@@ -1,6 +1,6 @@
-use std::env;
 use clap::{App, Arg};
 use kvs::{KvStore, Result};
+use std::env;
 
 fn main() -> Result<()> {
     let matches = App::new("kvs")
@@ -28,48 +28,33 @@ fn main() -> Result<()> {
     let mut kvs = KvStore::open(env::current_dir().unwrap())?;
 
     if let Some(matches) = matches.subcommand_matches("set") {
-        let key = match matches.value_of("key") {
-            Some(key) => key,
-            None => panic!("unable to read key parameter for command set")
-        };
+        let key = matches
+            .value_of("key")
+            .expect("unable to read key parameter for command set");
 
-        let val = match matches.value_of("value") {
-            Some(val) => val,
-            None => panic!("unable to read value parameter for command set")
-        };
+        let val = matches
+            .value_of("value")
+            .expect("unable to read value parameter for command set");
 
         kvs.set(String::from(key), String::from(val))
-
     } else if let Some(matches) = matches.subcommand_matches("get") {
-        let key = match matches.value_of("key") {
-            Some(key) => key,
-            None => panic!("unable to read key parameter for command set")
-        };
+        let key = matches
+            .value_of("key")
+            .expect("unable to read key parameter for command set");
 
         match kvs.get(String::from(key)) {
-            Ok(value) => {
-                match value {
-                    Some(val) => {
-                        println!("{}", val);
-                        Ok(())
-                    },
-                    None => {
-                        println!("Key not found");
-                        Ok(())
-                    },
-                }
+            Ok(value) => match value {
+                Some(val) => println!("{}", val),
+                None => println!("Key not found"),
             },
-            Err(e) => {
-                println!("{}", e);
-                Ok(())
-            },
+            Err(e) => println!("{}", e),
         }
 
+        Ok(())
     } else if let Some(matches) = matches.subcommand_matches("rm") {
-        let key = match matches.value_of("key") {
-            Some(key) => key,
-            None => panic!("unable to read key parameter for command set")
-        };
+        let key = matches
+            .value_of("key")
+            .expect("unable to read key parameter for command set");
 
         match kvs.remove(String::from(key)) {
             Ok(_) => Ok(()),
@@ -78,7 +63,6 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
-
     } else {
         panic!("invalid command")
     }

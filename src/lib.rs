@@ -1,11 +1,11 @@
+use failure::{format_err, Error};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io;
-use std::path::{Path, PathBuf};
-use failure::{Error, format_err};
-use serde::{Serialize, Deserialize};
 use std::io::prelude::*;
 use std::ops::Add;
+use std::path::{Path, PathBuf};
 
 #[deny(missing_docs)]
 #[derive(Debug)]
@@ -72,14 +72,19 @@ impl KvStore {
         self.compact();
 
         // If that succeeds, it exits silently with error code 0
-        return Ok(());
+        Ok(())
     }
 
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
         // kvs reads the entire log, one command at a time, recording the affected key and file offset of the command to an in-memory key -> log pointer map
         match KvStore::open(Path::new(&self.filepath)) {
-            Ok(kvs) => { self.store = kvs.store }
-            Err(e) => return Err(format_err!("Couldn't open file to insert key value pars: {}", e))
+            Ok(kvs) => self.store = kvs.store,
+            Err(e) => {
+                return Err(format_err!(
+                    "Couldn't open file to insert key value pars: {}",
+                    e
+                ))
+            }
         }
 
         // It then checks the map for the log pointer
@@ -97,15 +102,14 @@ impl KvStore {
         // Same as the "get" command, kvs reads the entire log to build the in-memory index
         // It then checks the map if the given key exists
         // If the key does not exist, it prints "Key not found", and exits with a non-zero error code
-        match self.get(key.clone()) { // Todo not sure if the clone is right
-            Ok(option) => {
-                match option {
-                    Some(_) => {}
-                    None => {
-                        return Err(format_err!("Key not found"));
-                    }
+        match self.get(key.clone()) {
+            // Todo not sure if the clone is right
+            Ok(option) => match option {
+                Some(_) => {}
+                None => {
+                    return Err(format_err!("Key not found"));
                 }
-            }
+            },
             Err(e) => {
                 return Err(e);
             }
@@ -152,16 +156,20 @@ impl KvStore {
             return;
         }
 
-        let data = self.to_string();
+        let data = self.to_serialized();
 
-        let mut f = std::fs::OpenOptions::new().write(true).truncate(true).open(&self.filepath).expect("cannot open to file");
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&self.filepath)
+            .expect("cannot open to file");
 
         f.write_all(data.as_ref()).expect("cannot write to file");
 
         f.flush().expect("cannot flush file buffer");
     }
 
-    fn to_string(&self) -> String {
+    fn to_serialized(&self) -> String {
         let mut result = String::new();
 
         for (key, value) in &self.store {
@@ -205,7 +213,7 @@ impl KvStore {
             if let Ok(ip) = line {
                 // Todo: It should ideally not deserialize every line, only those of the matching key.
                 // Will make improvement.
-                let cmd: Command = serde_json::from_str(&ip.trim()).unwrap();
+                let cmd: Command = serde_json::from_str(ip.trim()).unwrap();
 
                 if cmd.kind == "set" {
                     kvs.store.insert(cmd.key, cmd.value);
