@@ -1,8 +1,9 @@
 use failure::{format_err, Error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io;
+use std::io::BufReader;
 use std::io::prelude::*;
 use std::ops::Add;
 use std::path::{Path, PathBuf};
@@ -11,7 +12,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug)]
 /// Stores key-value pairs in memory.
 pub struct KvStore {
-    store: HashMap<String, String>,
+    store: HashMap<String, i32>,
     filepath: String,
     entries: i32,
 }
@@ -40,7 +41,6 @@ impl KvStore {
 
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
         let cloned_key = String::from(&key);
-        let cloned_value = String::from(&value);
 
         // It then serializes that command to a String
         let cmd = Command {
@@ -51,8 +51,14 @@ impl KvStore {
 
         let cmd_string = serde_json::to_string(&cmd)?;
 
-        // It then appends the serialized command to a file containing the log
-        let mut file = OpenOptions::new()
+        let file = BufReader::new(File::open(&self.filepath).expect("Unable to open file"));
+        let mut line_count = 0;
+
+        for _ in file.lines() {
+            line_count = line_count + 1;
+        }
+
+        let mut file2 = OpenOptions::new()
             .create(true)
             .write(true)
             .append(true)
@@ -60,12 +66,12 @@ impl KvStore {
             .unwrap();
 
         // If it fails, it exits by printing the error and returning a non-zero error code
-        if let Err(e) = writeln!(file, "{}", cmd_string) {
+        if let Err(e) = writeln!(file2, "{}", cmd_string) {
             eprintln!("Couldn't write to file: {}", e);
             return Err(format_err!("Couldn't write to file: {}", e));
         }
 
-        self.store.insert(cloned_key, cloned_value);
+        self.store.insert(cloned_key, line_count + 1);
 
         self.entries += 1;
 
@@ -76,26 +82,45 @@ impl KvStore {
     }
 
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
-        // kvs reads the entire log, one command at a time, recording the affected key and file offset of the command to an in-memory key -> log pointer map
-        match KvStore::open(Path::new(&self.filepath)) {
-            Ok(kvs) => self.store = kvs.store,
-            Err(e) => {
-                return Err(format_err!(
-                    "Couldn't open file to insert key value pars: {}",
-                    e
-                ))
+        // It then checks the map for the log pointer
+        let index = match self.store.get(&key) {
+            Some(val) => val,
+            // If it fails, it prints "Key not found", and exits with exit code 0
+            None => return Result::Ok(None),
+        };
+
+        // If it succeeds
+        // It deserializes the command to get the last recorded value of the key
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .read(true)
+            .open(String::from(&self.filepath))
+            .unwrap();
+
+        let mut line_count = 0;
+
+        let mut cmd_string = String::new();
+
+        for line in io::BufReader::new(file).lines() {
+            if let Ok(ip) = line {
+                line_count = line_count + 1;
+
+                if line_count == *index {
+                    cmd_string = ip;
+                    break;
+                }
             }
         }
 
-        // It then checks the map for the log pointer
-        // If it succeeds
-        // It deserializes the command to get the last recorded value of the key
+        if cmd_string == "" {
+            return Result::Ok(None);
+        }
+
+        let cmd: Command = serde_json::from_str(cmd_string.trim()).unwrap();
+
         // It prints the value to stdout and exits with exit code 0
-        return match self.store.get(&key) {
-            Some(val) => Result::Ok(Some(String::from(val))),
-            // If it fails, it prints "Key not found", and exits with exit code 0
-            None => Result::Ok(None),
-        };
+        Result::Ok(Some(cmd.value))
     }
 
     pub fn remove(&mut self, key: String) -> Result<()> {
@@ -103,7 +128,6 @@ impl KvStore {
         // It then checks the map if the given key exists
         // If the key does not exist, it prints "Key not found", and exits with a non-zero error code
         match self.get(key.clone()) {
-            // Todo not sure if the clone is right
             Ok(option) => match option {
                 Some(_) => {}
                 None => {
@@ -167,24 +191,30 @@ impl KvStore {
         f.write_all(data.as_ref()).expect("cannot write to file");
 
         f.flush().expect("cannot flush file buffer");
+
+        self.load_into_memory();
     }
 
     fn to_serialized(&self) -> String {
+        let file = File::open(&self.filepath).expect("no such file");
+        let buf = BufReader::new(file);
+        let content: Vec<String> = buf.lines()
+            .map(|l| l.expect("Could not parse line"))
+            .collect();
+
         let mut result = String::new();
 
+        let mut swap_keys_values: HashMap<i32, String> = HashMap::new();
+
         for (key, value) in &self.store {
-            let cloned_key = String::from(key);
-            let cloned_value = String::from(value);
+            swap_keys_values.insert(*value, String::from(key));
+        }
 
-            let cmd = Command {
-                key: cloned_key,
-                value: cloned_value,
-                kind: String::from("set"),
-            };
+        for n in 1..=swap_keys_values.len() {
+            let index = n - 1;
+            let cloned_value = content.get(index as usize).expect("cannot read value from file");
 
-            let cmd_string = serde_json::to_string(&cmd).expect("cannot convert command to json");
-
-            result = result.add(&cmd_string);
+            result = result.add(&cloned_value);
             result = result.add("\n");
         }
 
@@ -202,29 +232,36 @@ impl KvStore {
 
         let mut kvs = KvStore::new(filepath);
 
+        kvs.load_into_memory();
+
+        Ok(kvs)
+    }
+
+    fn load_into_memory(&mut self) {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
-            .open(String::from(&kvs.filepath))
+            .open(String::from(&self.filepath))
             .unwrap();
+
+        let mut line_count = 0;
 
         for line in io::BufReader::new(file).lines() {
             if let Ok(ip) = line {
-                // Todo: It should ideally not deserialize every line, only those of the matching key.
-                // Will make improvement.
-                let cmd: Command = serde_json::from_str(ip.trim()).unwrap();
+                let cmd = gjson::get(&ip, "kind");
+                let key = gjson::get(&ip, "key");
 
-                if cmd.kind == "set" {
-                    kvs.store.insert(cmd.key, cmd.value);
-                } else if cmd.kind == "rm" {
-                    kvs.store.remove(&cmd.key);
+                line_count = line_count + 1;
+
+                if cmd.str() == "set" {
+                    self.store.insert(String::from(key.str()), line_count);
+                } else if cmd.str() == "rm" {
+                    self.store.remove(&String::from(key.str()));
                 }
+
+                self.entries = self.entries + 1;
             }
         }
-
-        kvs.compact();
-
-        Ok(kvs)
     }
 }
