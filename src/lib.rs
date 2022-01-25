@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use failure::{Error, format_err};
 use serde::{Serialize, Deserialize};
 use std::io::prelude::*;
+use std::ops::Add;
 
 #[deny(missing_docs)]
 #[derive(Debug)]
@@ -12,6 +13,7 @@ use std::io::prelude::*;
 pub struct KvStore {
     store: HashMap<String, String>,
     filepath: String,
+    entries: i32,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -32,10 +34,14 @@ impl KvStore {
         KvStore {
             store: HashMap::new(),
             filepath,
+            entries: 0,
         }
     }
 
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
+        let cloned_key = String::from(&key);
+        let cloned_value = String::from(&value);
+
         // It then serializes that command to a String
         let cmd = Command {
             key,
@@ -59,28 +65,32 @@ impl KvStore {
             return Err(format_err!("Couldn't write to file: {}", e));
         }
 
+        self.store.insert(cloned_key, cloned_value);
+
+        self.entries += 1;
+
+        self.compact();
+
         // If that succeeds, it exits silently with error code 0
         return Ok(());
     }
 
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
         // kvs reads the entire log, one command at a time, recording the affected key and file offset of the command to an in-memory key -> log pointer map
-        match KvStore::open(Path::new(".")) {
+        match KvStore::open(Path::new(&self.filepath)) {
             Ok(kvs) => { self.store = kvs.store }
             Err(e) => return Err(format_err!("Couldn't open file to insert key value pars: {}", e))
         }
 
         // It then checks the map for the log pointer
-        let found_value = match self.store.get(&key) {
-            Some(val) => val,
-            // If it fails, it prints "Key not found", and exits with exit code 0
-            None => return Err(format_err!("Key not found")),
-        };
-
         // If it succeeds
         // It deserializes the command to get the last recorded value of the key
         // It prints the value to stdout and exits with exit code 0
-        return Result::Ok(Some(String::from(found_value))); // Todo String::from is a hack, not sure how to do this better
+        return match self.store.get(&key) {
+            Some(val) => Result::Ok(Some(String::from(val))),
+            // If it fails, it prints "Key not found", and exits with exit code 0
+            None => Result::Ok(None),
+        };
     }
 
     pub fn remove(&mut self, key: String) -> Result<()> {
@@ -88,12 +98,20 @@ impl KvStore {
         // It then checks the map if the given key exists
         // If the key does not exist, it prints "Key not found", and exits with a non-zero error code
         match self.get(key.clone()) { // Todo not sure if the clone is right
-            Ok(_) => {}
-            Err(_) => {
-                println!("Key not found");
-                std::process::exit(1);
+            Ok(option) => {
+                match option {
+                    Some(_) => {}
+                    None => {
+                        return Err(format_err!("Key not found"));
+                    }
+                }
+            }
+            Err(e) => {
+                return Err(e);
             }
         }
+
+        let cloned_key = String::from(&key);
 
         // If it succeeds
         // It creates a value representing the "rm" command, containing its key
@@ -119,8 +137,50 @@ impl KvStore {
             return Err(format_err!("Couldn't write to file: {}", e));
         }
 
+        self.store.remove(&cloned_key);
+
+        self.entries += 1;
+
+        self.compact();
+
         // If that succeeds, it exits silently with error code 0
         return Ok(());
+    }
+
+    fn compact(&mut self) {
+        if self.entries % 50 != 0 {
+            return;
+        }
+
+        let data = self.to_string();
+
+        let mut f = std::fs::OpenOptions::new().write(true).truncate(true).open(&self.filepath).expect("cannot open to file");
+
+        f.write_all(data.as_ref()).expect("cannot write to file");
+
+        f.flush().expect("cannot flush file buffer");
+    }
+
+    fn to_string(&self) -> String {
+        let mut result = String::new();
+
+        for (key, value) in &self.store {
+            let cloned_key = String::from(key);
+            let cloned_value = String::from(value);
+
+            let cmd = Command {
+                key: cloned_key,
+                value: cloned_value,
+                kind: String::from("set"),
+            };
+
+            let cmd_string = serde_json::to_string(&cmd).expect("cannot convert command to json");
+
+            result = result.add(&cmd_string);
+            result = result.add("\n");
+        }
+
+        result
     }
 
     pub fn open(path: impl Into<PathBuf>) -> Result<KvStore> {
@@ -154,6 +214,8 @@ impl KvStore {
                 }
             }
         }
+
+        kvs.compact();
 
         Ok(kvs)
     }

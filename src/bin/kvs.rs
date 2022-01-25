@@ -1,6 +1,4 @@
 use std::env;
-use std::env::current_dir;
-use std::path::Path;
 use clap::{App, Arg};
 use kvs::{KvStore, Result};
 
@@ -55,7 +53,10 @@ fn main() -> Result<()> {
                         println!("{}", val);
                         Ok(())
                     },
-                    None => Ok(()),
+                    None => {
+                        println!("Key not found");
+                        Ok(())
+                    },
                 }
             },
             Err(e) => {
@@ -70,7 +71,13 @@ fn main() -> Result<()> {
             None => panic!("unable to read key parameter for command set")
         };
 
-        kvs.remove(String::from(key))
+        match kvs.remove(String::from(key)) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                println!("{}", e);
+                std::process::exit(1);
+            }
+        }
 
     } else {
         panic!("invalid command")
