@@ -48,7 +48,6 @@ const COMPACT_FREQUENCY: i32 = 50;
 struct Command {
     key: String,
     value: String,
-    // TODO: Change to enum
     kind: String,
 }
 
@@ -63,10 +62,20 @@ impl KvStore {
         }
     }
 
+    /// Sets a key with a value in the store.
+    /// # Examples
+    /// ```
+    /// use kvs::KvStore;
+    /// let mut kvs = KvStore::new(String::from("."));
+    ///
+    /// let key = String::from("foo");
+    /// let value = String::from("bar");
+    ///
+    /// kvs.set(key, value);
+    /// ```
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
         let cloned_key = String::from(&key);
 
-        // It then serializes that command to a String
         let cmd = Command {
             key,
             value,
@@ -88,7 +97,6 @@ impl KvStore {
             .append(true)
             .open(String::from(&self.filepath))?;
 
-        // If it fails, it exits by printing the error and returning a non-zero error code
         if let Err(e) = writeln!(file2, "{}", cmd_string) {
             return Err(Box::new(e));
         }
@@ -99,20 +107,28 @@ impl KvStore {
 
         self.compact()?;
 
-        // If that succeeds, it exits silently with error code 0
         Ok(())
     }
 
+    /// Gets a value in the store using the key.
+    /// # Examples
+    /// ```
+    /// use kvs::KvStore;
+    /// let mut kvs = KvStore::new(String::from("."));
+    ///
+    /// let key = String::from("foo");
+    /// let value = String::from("bar");
+    ///
+    /// kvs.set(key, value);
+    ///
+    /// print!(kvs.get(String::from("foo")));
+    /// ```
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
-        // It then checks the map for the log pointer
         let index = match self.store.get(&key) {
             Some(val) => val,
-            // If it fails, it prints "Key not found", and exits with exit code 0
             None => return Result::Ok(None),
         };
 
-        // If it succeeds
-        // It deserializes the command to get the last recorded value of the key
         let file = OpenOptions::new()
             .create(true)
             .write(true)
@@ -140,14 +156,23 @@ impl KvStore {
 
         let cmd: Command = serde_json::from_str(cmd_string.trim())?;
 
-        // It prints the value to stdout and exits with exit code 0
         Result::Ok(Some(cmd.value))
     }
 
+    /// Removes the value and key in the store using the key.
+    /// # Examples
+    /// ```
+    /// use kvs::KvStore;
+    /// let mut kvs = KvStore::new(String::from("."));
+    ///
+    /// let key = String::from("foo");
+    /// let value = String::from("bar");
+    ///
+    /// kvs.set(key, value);
+    ///
+    /// kvs.rm(String::from("foo"));
+    /// ```
     pub fn remove(&mut self, key: String) -> Result<()> {
-        // Same as the "get" command, kvs reads the entire log to build the in-memory index
-        // It then checks the map if the given key exists
-        // If the key does not exist, it prints "Key not found", and exits with a non-zero error code
         match self.get(key.clone()) {
             Ok(option) => match option {
                 Some(_) => {}
@@ -160,8 +185,6 @@ impl KvStore {
 
         let cloned_key = String::from(&key);
 
-        // If it succeeds
-        // It creates a value representing the "rm" command, containing its key
         let cmd = Command {
             key,
             value: String::new(),
@@ -170,14 +193,12 @@ impl KvStore {
 
         let cmd_string = serde_json::to_string(&cmd)?;
 
-        // It then appends the serialized command to the log
         let mut file = OpenOptions::new()
             .create(true)
             .write(true)
             .append(true)
             .open(String::from(&self.filepath))?;
 
-        // If it fails, it exits by printing the error and returning a non-zero error code
         if let Err(_) = writeln!(file, "{}", cmd_string) {
             return Err(Box::new(WriteFileError));
         }
@@ -188,7 +209,6 @@ impl KvStore {
 
         self.compact()?;
 
-        // If that succeeds, it exits silently with error code 0
         return Ok(());
     }
 
