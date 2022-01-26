@@ -204,17 +204,21 @@ impl KvStore {
 
         let mut result = String::new();
 
-        let mut swap_keys_values: HashMap<i32, String> = HashMap::new();
+        let mut tmp_map: HashMap<String, String> = HashMap::new();
 
-        for (key, value) in &self.store {
-            swap_keys_values.insert(*value, String::from(key));
+        for item in content {
+            let cmd = gjson::get(&item, "kind");
+            let key = gjson::get(&item, "key");
+
+            if cmd.str() == "set" {
+                tmp_map.insert(String::from(key.str()), item);
+            } else if cmd.str() == "rm" {
+                tmp_map.remove(&String::from(key.str()));
+            }
         }
 
-        for n in 1..=swap_keys_values.len() {
-            let index = n - 1;
-            let cloned_value = content.get(index as usize).expect("cannot read value from file");
-
-            result = result.add(&cloned_value);
+        for (_, value) in tmp_map {
+            result = result.add(&value);
             result = result.add("\n");
         }
 
@@ -246,6 +250,10 @@ impl KvStore {
             .unwrap();
 
         let mut line_count = 0;
+
+        self.entries = 0;
+
+        self.store = HashMap::new();
 
         for line in io::BufReader::new(file).lines() {
             if let Ok(ip) = line {
