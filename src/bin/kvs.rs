@@ -1,5 +1,5 @@
 use std::env;
-use clap::{App, Arg};
+use clap::{App, Arg, ArgMatches};
 use kvs::{KvStore, Result};
 
 fn main() -> Result<()> {
@@ -25,7 +25,7 @@ fn main() -> Result<()> {
         )
         .get_matches();
 
-    let mut kvs = KvStore::open(env::current_dir().unwrap())?;
+    let mut kvs = KvStore::open(env::current_dir()?)?;
 
     if let Some(matches) = matches.subcommand_matches("set") {
         let key = matches

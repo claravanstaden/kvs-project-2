@@ -1,4 +1,4 @@
-#Key Value Store
+# Key Value Store
 
 Stores key value pairs with a log backing. The program compacts the key store after 50 entries, meaning that duplicate keys will be cleaned up, for instance:  
 ```
