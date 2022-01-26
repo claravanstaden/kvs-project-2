@@ -59,6 +59,8 @@ fn main() -> Result<()> {
         match kvs.remove(String::from(key)) {
             Ok(_) => Ok(()),
             Err(_) => {
+                // Ideally we'd need to check the error type here, still need to figure out how
+                // to do that with Box<Error>
                 println!("Key not found");
                 std::process::exit(1);
             }
