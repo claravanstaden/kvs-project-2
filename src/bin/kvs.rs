@@ -1,6 +1,6 @@
+use std::env;
 use clap::{App, Arg};
 use kvs::{KvStore, Result};
-use std::env;
 
 fn main() -> Result<()> {
     let matches = App::new("kvs")
@@ -58,8 +58,8 @@ fn main() -> Result<()> {
 
         match kvs.remove(String::from(key)) {
             Ok(_) => Ok(()),
-            Err(e) => {
-                println!("{}", e);
+            Err(_) => {
+                println!("Key not found");
                 std::process::exit(1);
             }
         }

@@ -1,12 +1,14 @@
-use failure::{format_err, Error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::error::Error;
+use std::fmt::{Debug, Display, Formatter};
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::BufReader;
 use std::io::prelude::*;
 use std::ops::Add;
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
+use crate::CustomError::{InvalidPathError, KeyNotFound, WriteFileError};
 
 #[deny(missing_docs)]
 #[derive(Debug)]
@@ -17,14 +19,36 @@ pub struct KvStore {
     entries: i32,
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub enum CustomError {
+    InvalidPathError,
+    WriteFileError,
+    KeyNotFound,
+}
+
+impl Debug for CustomError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "error: {:?}", self)
+    }
+}
+
+impl Display for CustomError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "error: {:?}", self)
+    }
+}
+
+impl Error for CustomError {}
+
+pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const FILE_NAME: &str = "log.txt";
+const COMPACT_FREQUENCY: i32 = 50;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Command {
     key: String,
     value: String,
+    // TODO: Change to enum
     kind: String,
 }
 
@@ -51,7 +75,7 @@ impl KvStore {
 
         let cmd_string = serde_json::to_string(&cmd)?;
 
-        let file = BufReader::new(File::open(&self.filepath).expect("Unable to open file"));
+        let file = BufReader::new(File::open(&self.filepath)?);
         let mut line_count = 0;
 
         for _ in file.lines() {
@@ -62,20 +86,18 @@ impl KvStore {
             .create(true)
             .write(true)
             .append(true)
-            .open(String::from(&self.filepath))
-            .unwrap();
+            .open(String::from(&self.filepath))?;
 
         // If it fails, it exits by printing the error and returning a non-zero error code
         if let Err(e) = writeln!(file2, "{}", cmd_string) {
-            eprintln!("Couldn't write to file: {}", e);
-            return Err(format_err!("Couldn't write to file: {}", e));
+            return Err(Box::new(e));
         }
 
         self.store.insert(cloned_key, line_count + 1);
 
         self.entries += 1;
 
-        self.compact();
+        self.compact()?;
 
         // If that succeeds, it exits silently with error code 0
         Ok(())
@@ -91,12 +113,11 @@ impl KvStore {
 
         // If it succeeds
         // It deserializes the command to get the last recorded value of the key
-        let mut file = OpenOptions::new()
+        let file = OpenOptions::new()
             .create(true)
             .write(true)
             .read(true)
-            .open(String::from(&self.filepath))
-            .unwrap();
+            .open(String::from(&self.filepath))?;
 
         let mut line_count = 0;
 
@@ -117,7 +138,7 @@ impl KvStore {
             return Result::Ok(None);
         }
 
-        let cmd: Command = serde_json::from_str(cmd_string.trim()).unwrap();
+        let cmd: Command = serde_json::from_str(cmd_string.trim())?;
 
         // It prints the value to stdout and exits with exit code 0
         Result::Ok(Some(cmd.value))
@@ -130,9 +151,7 @@ impl KvStore {
         match self.get(key.clone()) {
             Ok(option) => match option {
                 Some(_) => {}
-                None => {
-                    return Err(format_err!("Key not found"));
-                }
+                None => return Err(Box::new(KeyNotFound))
             },
             Err(e) => {
                 return Err(e);
@@ -156,28 +175,26 @@ impl KvStore {
             .create(true)
             .write(true)
             .append(true)
-            .open(String::from(&self.filepath))
-            .unwrap();
+            .open(String::from(&self.filepath))?;
 
         // If it fails, it exits by printing the error and returning a non-zero error code
-        if let Err(e) = writeln!(file, "{}", cmd_string) {
-            eprintln!("Couldn't write to file: {}", e);
-            return Err(format_err!("Couldn't write to file: {}", e));
+        if let Err(_) = writeln!(file, "{}", cmd_string) {
+            return Err(Box::new(WriteFileError));
         }
 
         self.store.remove(&cloned_key);
 
         self.entries += 1;
 
-        self.compact();
+        self.compact()?;
 
         // If that succeeds, it exits silently with error code 0
         return Ok(());
     }
 
-    fn compact(&mut self) {
-        if self.entries % 50 != 0 {
-            return;
+    fn compact(&mut self) -> Result<()> {
+        if self.entries % COMPACT_FREQUENCY != 0 {
+            return Ok(());
         }
 
         let data = self.to_serialized();
@@ -185,14 +202,15 @@ impl KvStore {
         let mut f = std::fs::OpenOptions::new()
             .write(true)
             .truncate(true)
-            .open(&self.filepath)
-            .expect("cannot open to file");
+            .open(&self.filepath)?;
 
         f.write_all(data.as_ref()).expect("cannot write to file");
 
         f.flush().expect("cannot flush file buffer");
 
-        self.load_into_memory();
+        self.load_into_memory()?;
+
+        Ok(())
     }
 
     fn to_serialized(&self) -> String {
@@ -232,22 +250,24 @@ impl KvStore {
             into_path.push(FILE_NAME);
         }
 
-        let filepath = into_path.into_os_string().into_string().unwrap();
+        let filepath = into_path
+            .into_os_string()
+            .into_string()
+            .or(Err(Box::new(InvalidPathError)))?;
 
         let mut kvs = KvStore::new(filepath);
 
-        kvs.load_into_memory();
+        kvs.load_into_memory()?;
 
         Ok(kvs)
     }
 
-    fn load_into_memory(&mut self) {
+    fn load_into_memory(&mut self) -> Result<()> {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
-            .open(String::from(&self.filepath))
-            .unwrap();
+            .open(String::from(&self.filepath))?;
 
         let mut line_count = 0;
 
@@ -270,6 +290,8 @@ impl KvStore {
 
                 self.entries = self.entries + 1;
             }
-        }
+        };
+
+        Ok(())
     }
 }
